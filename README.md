@@ -1,9 +1,12 @@
 # vibecBox
 
-**vibecBox** (*vivi is not VirtualBox*) es una GUI de escritorio para Linux que
+**vibecBox** (*vivecode Box is not VirtualBox*) es una GUI de escritorio para Linux que
 imita la experiencia visual y el flujo de trabajo de VirtualBox, pero ejecuta
 **QEMU/KVM nativo**. No es un frontend de libvirt, no es un cliente remoto y no
 reemplaza a QEMU: lo orquesta con la mejor configuración posible para el host.
+
+<img width="1918" height="1038" alt="vibecBox" src="https://github.com/user-attachments/assets/5a217c9c-26a6-467c-a9d7-df93edb0425b" />
+
 
 ## Filosofía
 
