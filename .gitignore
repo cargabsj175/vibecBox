@@ -1,0 +1,41 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Archivos de bytecode y caché de Python
+__pycache__/
+*.pyc
+*.pyo
+**/__pycache__/
+
+# Distribución de Python
+dist/
+build/
+*.egg-info/
+
+# Archivos de sistema operativo y datos de prueba
+*.part
+*.qcow2
+*.iso
+
+# Datos de runtime de QEMU
+run/
+data/run/
+
+# Configuración y logs específicos de la sesión
+.vibecbox/
+*.log
+
+# Sensibles / secrets (si los hubiera)
+.env
+*.envSecret
+
+# Archivos binarios precompilados o descargados
+*.tar.gz
+*.tar.xz
+
+# Notas del desarrollador
+.DS_Store
+Thumbs.db

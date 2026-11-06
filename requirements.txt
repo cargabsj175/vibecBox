@@ -1,0 +1,3 @@
+# Dependencias de la GUI (Etapa 2). El backend solo usa la stdlib.
+# Qt 6.4 es el mínimo soportado por la comprobación de arranque.
+PyQt6>=6.4
