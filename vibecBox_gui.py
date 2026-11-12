@@ -68,6 +68,7 @@ import vibecBox_core as core
 LOG = logging.getLogger(__name__)
 
 MIN_QT_VERSION = (6, 4)
+DEFAULT_RAM_MAX_MB = 4096
 STATE_COLORS = {
     models.VMState.STOPPED: "#8a94a6",
     models.VMState.RUNNING: "#2e9e5b",
@@ -112,6 +113,30 @@ class HostInfo:
     img_version: str | None
     display: core.DisplaySupport | None
     ram_error: str | None = None
+
+    @property
+    def effective_ram_max_mb(self) -> int:
+        """RAM máxima usable; cae a un valor seguro si la lectura falló."""
+        value = self.ram_max_mb
+        if isinstance(value, int) and value >= models.MIN_RAM_MB:
+            return value
+        return DEFAULT_RAM_MAX_MB
+
+    @property
+    def effective_cores_max(self) -> int:
+        """CPUs lógicas usables; cae a 1 si el dato no es válido."""
+        value = self.cores_max
+        if isinstance(value, int) and value >= 1:
+            return value
+        return 1
+
+    @property
+    def resources_degraded(self) -> bool:
+        return (
+            self.ram_error is not None
+            or self.effective_ram_max_mb != self.ram_max_mb
+            or self.effective_cores_max != self.cores_max
+        )
 
 
 def load_host_info() -> HostInfo:
@@ -166,21 +191,27 @@ class NamePage(QWizardPage):
     def __init__(self, wizard: "VMWizard") -> None:
         super().__init__()
         self._wizard = wizard
-        self.setTitle("Nombre e instalación")
-        self.setSubTitle("Identifica la máquina y, si quieres, elige una ISO de arranque.")
+        self.setTitle(self.tr("Nombre e instalación"))
+        self.setSubTitle(
+            self.tr(
+                "Identifica la máquina y, si quieres, elige una ISO de arranque."
+            )
+        )
 
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("p. ej. Ubuntu 24.04")
+        self.name_edit.setPlaceholderText(self.tr("p. ej. Ubuntu 24.04"))
         self.name_edit.setMaxLength(models.MAX_NAME_LENGTH)
-        self.name_edit.textChanged.connect(self.completeChanged)
+        self.name_edit.textChanged.connect(self._refresh)
 
         self.iso_edit = QLineEdit()
-        self.iso_edit.setPlaceholderText("Sin ISO (arranque desde disco)")
-        self.iso_edit.textChanged.connect(self.completeChanged)
+        self.iso_edit.setPlaceholderText(
+            self.tr("Sin ISO (arranque desde disco)")
+        )
+        self.iso_edit.textChanged.connect(self._refresh)
 
-        browse = QPushButton("Examinar…")
+        browse = QPushButton(self.tr("Examinar…"))
         browse.clicked.connect(self._pick_iso)
-        clear = QPushButton("Quitar")
+        clear = QPushButton(self.tr("Quitar"))
         clear.clicked.connect(self.iso_edit.clear)
 
         iso_row = QHBoxLayout()
@@ -193,48 +224,64 @@ class NamePage(QWizardPage):
         self.hint.setObjectName("EmptyLabel")
 
         layout = QFormLayout(self)
-        layout.addRow("Nombre:", self.name_edit)
-        layout.addRow("Imagen ISO:", iso_row)
+        layout.addRow(self.tr("Nombre:"), self.name_edit)
+        layout.addRow(self.tr("Imagen ISO:"), iso_row)
         layout.addRow(self.hint)
+        self._refresh()
 
     def _pick_iso(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Seleccionar imagen ISO",
+            self.tr("Seleccionar imagen ISO"),
             str(Path.home()),
-            "Imágenes ISO (*.iso);;Todos los ficheros (*)",
+            self.tr("Imágenes ISO (*.iso);;Todos los ficheros (*)"),
         )
         if path:
             self.iso_edit.setText(path)
 
     def initializePage(self) -> None:
-        if self.name_edit.text():
-            return
-        self.name_edit.setText(f"VM {len(self._wizard.store.list()) + 1}")
-        self.name_edit.selectAll()
+        if not self.name_edit.text():
+            self.name_edit.setText(
+                self.tr("VM {number}").format(
+                    number=len(self._wizard.store.list()) + 1
+                )
+            )
+            self.name_edit.selectAll()
+        self._refresh()
 
-    def _name_error(self) -> str | None:
-        name = self.name_edit.text().strip()
-        if not name:
-            return "Escribe un nombre para la máquina."
-        if len(name) > models.MAX_NAME_LENGTH:
-            return f"Máximo {models.MAX_NAME_LENGTH} caracteres."
-        if any(ch in name for ch in ("/", "\\", "\0")):
-            return "El nombre no puede contener '/', '\\' ni caracteres nulos."
-        existing = self._wizard.store.names(exclude_id=self._wizard.existing_id)
-        if name.lower() in {item.lower() for item in existing}:
-            return "Ya existe una VM con ese nombre."
-        return None
+    def _validation_errors(self) -> list[str]:
+        names = self._wizard.store.names(exclude_id=self._wizard.existing_id)
+        errors = models.name_errors(
+            self.name_edit.text(), existing_names=names
+        )
+        errors.extend(
+            models.iso_path_errors(
+                self.iso_edit.text().strip() or None, check_paths=True
+            )
+        )
+        return errors
+
+    def _refresh(self) -> None:
+        """Actualiza el hint y notifica al asistente; no valida por sí solo."""
+        errors = self._validation_errors()
+        self.hint.setText(
+            "\n".join(errors)
+            if errors
+            else self.tr(
+                "La ISO es opcional: también puedes arrancar desde el disco."
+            )
+        )
+        self.completeChanged.emit()
 
     def isComplete(self) -> bool:
-        error = self._name_error()
-        self.hint.setText(error or "La ISO es opcional: también puedes arrancar desde el disco.")
-        return error is None
+        return not self._validation_errors()
 
     def validatePage(self) -> bool:
-        error = self._name_error()
-        if error:
-            QMessageBox.warning(self, "Nombre no válido", error)
+        errors = self._validation_errors()
+        if errors:
+            QMessageBox.warning(
+                self, self.tr("Nombre no válido"), "\n• ".join(errors)
+            )
             return False
         return True
 
@@ -243,33 +290,69 @@ class ResourcesPage(QWizardPage):
     def __init__(self, wizard: "VMWizard") -> None:
         super().__init__()
         self._wizard = wizard
-        self.setTitle("Memoria y procesadores")
-        self.setSubTitle("Ajusta los recursos según las capacidades reales del host.")
+        self.setTitle(self.tr("Memoria y procesadores"))
+        self.setSubTitle(
+            self.tr("Ajusta los recursos según las capacidades reales del host.")
+        )
+
+        host = wizard.host
+        ram_max = host.effective_ram_max_mb
+        cores_max = host.effective_cores_max
 
         self.ram_spin = QSpinBox()
-        self.ram_spin.setRange(models.MIN_RAM_MB, wizard.host.ram_max_mb)
+        self.ram_spin.setRange(models.MIN_RAM_MB, ram_max)
         self.ram_spin.setSingleStep(256)
-        self.ram_spin.setSuffix(" MB")
-        self.ram_spin.setValue(min(2048, wizard.host.ram_max_mb))
+        self.ram_spin.setSuffix(self.tr(" MB"))
+        self.ram_spin.setValue(min(2048, ram_max))
 
         self.cpu_spin = QSpinBox()
-        self.cpu_spin.setRange(1, wizard.host.cores_max)
-        self.cpu_spin.setValue(min(2, wizard.host.cores_max))
-        self.cpu_spin.setSuffix(" vCPU")
+        self.cpu_spin.setRange(1, cores_max)
+        self.cpu_spin.setValue(min(2, cores_max))
+        self.cpu_spin.setSuffix(self.tr(" vCPU"))
 
         self.ram_range = QLabel(
-            f"Disponible en el host: {wizard.host.ram_max_mb} MB "
-            f"({wizard.host.ram_max_mb / 1024:.1f} GiB)."
+            self.tr("Disponible en el host: {ram} MB ({gib:.1f} GiB).").format(
+                ram=ram_max, gib=ram_max / 1024
+            )
         )
-        self.cpu_range = QLabel(f"Hilos lógicos del host: {wizard.host.cores_max}.")
+        self.cpu_range = QLabel(
+            self.tr("Hilos lógicos del host: {cores}.").format(cores=cores_max)
+        )
         for label in (self.ram_range, self.cpu_range):
             label.setObjectName("EmptyLabel")
 
+        self.warning: QLabel | None = None
+        if host.resources_degraded:
+            notices: list[str] = []
+            if host.ram_error:
+                notices.append(
+                    self.tr(
+                        "RAM: {error} Se asumen {ram} MB."
+                    ).format(error=host.ram_error, ram=ram_max)
+                )
+            elif ram_max != host.ram_max_mb:
+                notices.append(
+                    self.tr(
+                        "RAM del host no válida ({value}); se asumen {ram} MB."
+                    ).format(value=host.ram_max_mb, ram=ram_max)
+                )
+            if cores_max != host.cores_max:
+                notices.append(
+                    self.tr(
+                        "CPUs del host no válidas ({value}); se asume {cores}."
+                    ).format(value=host.cores_max, cores=cores_max)
+                )
+            self.warning = QLabel("\n".join(notices))
+            self.warning.setWordWrap(True)
+            self.warning.setStyleSheet("color: #c0392b; font-weight: 600;")
+
         layout = QFormLayout(self)
-        layout.addRow("Memoria RAM:", self.ram_spin)
+        layout.addRow(self.tr("Memoria RAM:"), self.ram_spin)
         layout.addRow(self.ram_range)
-        layout.addRow("Procesadores:", self.cpu_spin)
+        layout.addRow(self.tr("Procesadores:"), self.cpu_spin)
         layout.addRow(self.cpu_range)
+        if self.warning is not None:
+            layout.addRow(self.warning)
 
     def isComplete(self) -> bool:
         return True
@@ -388,14 +471,14 @@ class VMWizard(QWizard):
             self._load(existing)
 
     def _load(self, vm: models.VMConfig) -> None:
+        ram_max = self.host.effective_ram_max_mb
+        cores_max = self.host.effective_cores_max
         self.name_page.name_edit.setText(vm.name)
         self.name_page.iso_edit.setText(vm.iso_path or "")
         self.resources_page.ram_spin.setValue(
-            max(models.MIN_RAM_MB, min(vm.ram_mb, self.host.ram_max_mb))
+            max(models.MIN_RAM_MB, min(vm.ram_mb, ram_max))
         )
-        self.resources_page.cpu_spin.setValue(
-            max(1, min(vm.vcpus, self.host.cores_max))
-        )
+        self.resources_page.cpu_spin.setValue(max(1, min(vm.vcpus, cores_max)))
         self.storage_page.disk_spin.setValue(
             max(models.MIN_DISK_GB, min(vm.disk_gb, models.MAX_DISK_GB))
         )
@@ -437,8 +520,8 @@ class VMWizard(QWizard):
     def accept(self) -> None:
         config = self._build_config()
         errors = config.validate(
-            ram_max_mb=self.host.ram_max_mb,
-            cores_max=self.host.cores_max,
+            ram_max_mb=self.host.effective_ram_max_mb,
+            cores_max=self.host.effective_cores_max,
             existing_names=self.store.names(exclude_id=self.existing_id),
             check_paths=True,
         )
