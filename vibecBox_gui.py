@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -69,6 +70,9 @@ LOG = logging.getLogger(__name__)
 
 MIN_QT_VERSION = (6, 4)
 DEFAULT_RAM_MAX_MB = 4096
+CLOSE_GRACEFUL_TIMEOUT_MS = 2000
+CLOSE_KILL_TIMEOUT_MS = 2000
+_WAIT_SLICE_MS = 50
 STATE_COLORS = {
     models.VMState.STOPPED: "#8a94a6",
     models.VMState.RUNNING: "#2e9e5b",
@@ -537,47 +541,181 @@ class VMWizard(QWizard):
 # Diagnóstico del host
 # --------------------------------------------------------------------------- #
 class DiagnosticsDialog(QDialog):
-    def __init__(self, host: HostInfo, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        host: HostInfo,
+        parent: QWidget | None = None,
+        *,
+        snapshot: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Diagnóstico del host")
+        self.host = host
+        self.setWindowTitle(self.tr("Diagnóstico del host"))
         self.resize(720, 520)
 
-        lines = [
-            f"Python:            {sys.version.split()[0]}",
-            f"KVM utilizable:    {'sí' if host.kvm_ok else 'NO'}",
-            f"RAM máxima:        {host.ram_max_mb} MB",
-            f"CPUs lógicas:      {host.cores_max}",
-            f"qemu-system:       {host.qemu_path or 'no encontrado'}",
-            f"QEMU versión:      {host.qemu_version or 'desconocida'}",
-            f"qemu-img versión:  {host.img_version or 'desconocida'}",
-        ]
-        if host.display is None:
-            lines.append("Backends de vídeo: no comprobados (falta qemu-system)")
-        elif not host.display.probed:
-            lines.append(f"Backends de vídeo: error al consultar ({host.display.error})")
-        else:
-            lines.append(
-                "Backends de vídeo: " + ", ".join(sorted(host.display.backends))
-            )
-            lines.append(
-                "Ventana nativa:    "
-                + ("sí (GTK/SDL)" if host.display.has_window_backend else "NO (headless)")
-            )
-        if host.ram_error:
-            lines.append(f"Aviso RAM:         {host.ram_error}")
-        lines.append("")
-        lines.append("Etapa actual: 4 (lanzamiento con QProcess y ciclo de vida real).")
+        if snapshot is None:
+            snapshot = core.environment_snapshot()
+        self.report_text = self._format_report(snapshot, host)
 
-        text = QPlainTextEdit("\n".join(lines))
-        text.setReadOnly(True)
+        self.text = QPlainTextEdit(self.report_text)
+        self.text.setReadOnly(True)
+
+        self.copy_button = QPushButton(self.tr("Copiar"))
+        self.copy_button.clicked.connect(self._copy)
+        self.copy_status = QLabel()
+        self.copy_status.setObjectName("EmptyLabel")
+        self.copy_status.setVisible(False)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.addButton(self.copy_button, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(text)
+        layout.addWidget(self.text)
+        layout.addWidget(self.copy_status)
         layout.addWidget(buttons)
+
+    def _copy(self) -> None:
+        QApplication.clipboard().setText(self.report_text)
+        self.copy_status.setText(self.tr("Reporte copiado al portapapeles."))
+        self.copy_status.setVisible(True)
+
+    def _format_report(
+        self, snapshot: dict[str, object], host: HostInfo
+    ) -> str:
+        lines: list[str] = []
+        lines.append(
+            self.tr("Aplicación:        {app}").format(
+                app=snapshot.get("app", core.APP_NAME)
+            )
+        )
+        lines.append(
+            self.tr("Python:            {version}").format(
+                version=snapshot.get("python", sys.version.split()[0])
+            )
+        )
+        lines.append(
+            self.tr("Plataforma:        {platform}").format(
+                platform=snapshot.get("platform", self.tr("desconocida"))
+            )
+        )
+        lines.append("")
+
+        kvm = snapshot.get("kvm")
+        if isinstance(kvm, core.KvmStatus):
+            state = self.tr("utilizable") if kvm.usable else self.tr("NO utilizable")
+            lines.append(
+                self.tr(
+                    "KVM:               {device} | grupo={group} | "
+                    "char={char} r={readable} w={writable} | {state}"
+                ).format(
+                    device=kvm.device,
+                    group=kvm.group or "?",
+                    char=self.tr("sí") if kvm.is_char_device else self.tr("no"),
+                    readable=self.tr("sí") if kvm.readable else self.tr("no"),
+                    writable=self.tr("sí") if kvm.writable else self.tr("no"),
+                    state=state,
+                )
+            )
+        else:
+            lines.append(self.tr("KVM:               no comprobado"))
+
+        ram_mb = snapshot.get("ram_max_mb")
+        if isinstance(ram_mb, int):
+            lines.append(
+                self.tr("RAM máxima:        {ram} MB ({gib:.1f} GiB)").format(
+                    ram=ram_mb, gib=ram_mb / 1024
+                )
+            )
+        else:
+            lines.append(self.tr("RAM máxima:        no disponible"))
+        cores = snapshot.get("cores_max")
+        lines.append(
+            self.tr("CPUs lógicas:      {cores}").format(
+                cores=cores
+                if isinstance(cores, int)
+                else self.tr("no disponible")
+            )
+        )
+
+        bin_dir = snapshot.get("bin_dir")
+        if bin_dir:
+            state = (
+                self.tr("existe")
+                if snapshot.get("bin_dir_exists")
+                else self.tr("se creará en la primera descarga")
+            )
+            lines.append(
+                self.tr("Directorio bin.:   {path} ({state})").format(
+                    path=bin_dir, state=state
+                )
+            )
+
+        binaries = snapshot.get("binaries")
+        if isinstance(binaries, dict):
+            for name in core.MANAGED_BINARIES:
+                status = binaries.get(name)
+                if isinstance(status, core.BinaryStatus):
+                    lines.append(
+                        self.tr(
+                            "{name}: {source} {path} | {version}"
+                        ).format(
+                            name=name,
+                            source=status.source,
+                            path=status.path or self.tr("no encontrado"),
+                            version=status.version
+                            or self.tr("versión desconocida"),
+                        )
+                    )
+                else:
+                    lines.append(
+                        self.tr("{name}: no comprobado").format(name=name)
+                    )
+        else:
+            lines.append(self.tr("Binarios:          no comprobados"))
+
+        display = snapshot.get("qemu_display")
+        if display is None:
+            lines.append(
+                self.tr("Backends de vídeo: no comprobados (falta qemu-system)")
+            )
+        elif isinstance(display, core.DisplaySupport):
+            if not display.probed:
+                lines.append(
+                    self.tr(
+                        "Backends de vídeo: error al consultar ({error})"
+                    ).format(error=display.error)
+                )
+            else:
+                lines.append(
+                    self.tr("Backends de vídeo: {backends}").format(
+                        backends=", ".join(sorted(display.backends))
+                    )
+                )
+                lines.append(
+                    self.tr("Ventana nativa:    {state}").format(
+                        state=self.tr("sí (GTK/SDL)")
+                        if display.has_window_backend
+                        else self.tr("NO (headless)")
+                    )
+                )
+        else:
+            lines.append(self.tr("Backends de vídeo: no comprobados"))
+
+        if ram_mb is None and host.ram_error:
+            lines.append(
+                self.tr("Aviso RAM:         {error}").format(
+                    error=host.ram_error
+                )
+            )
+        lines.append("")
+        lines.append(
+            self.tr(
+                "Etapa actual: 4 (lanzamiento con QProcess y ciclo de vida real)."
+            )
+        )
+        return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -1136,14 +1274,35 @@ class MainWindow(QMainWindow):
         )
 
     # -- ciclo de vida ----------------------------------------------------- #
+    @staticmethod
+    def _wait_runners(runners: list[object], timeout_ms: int) -> None:
+        """Espera acotada procesando eventos para que QMP pueda responder."""
+        deadline = time.monotonic() + timeout_ms / 1000
+        pending = [active for active in runners if active.is_running]
+        while pending and time.monotonic() < deadline:
+            QApplication.processEvents()
+            for active in list(pending):
+                if not active.is_running:
+                    pending.remove(active)
+                else:
+                    active.wait_for_finished(_WAIT_SLICE_MS)
+
     def closeEvent(self, event) -> None:  # noqa: N802 (API Qt)
         self._settings.setValue("window/geometry", self.saveGeometry())
-        if self.runners:
-            LOG.info("Cerrando %d VM(s) en ejecución", len(self.runners))
-            for active in list(self.runners.values()):
-                active.force_kill()
-            for active in list(self.runners.values()):
-                active.wait_for_finished(3000)
+        active_runners = list(self.runners.values())
+        if active_runners:
+            LOG.info("Cerrando %d VM(s) en ejecución", len(active_runners))
+            for active in active_runners:
+                if active.is_running:
+                    active.stop(graceful=True)
+            self._wait_runners(active_runners, CLOSE_GRACEFUL_TIMEOUT_MS)
+            for active in active_runners:
+                if active.is_running:
+                    LOG.warning(
+                        "QEMU no se apagó a tiempo al cerrar; enviando SIGKILL."
+                    )
+                    active.force_kill()
+            self._wait_runners(active_runners, CLOSE_KILL_TIMEOUT_MS)
             self.runners.clear()
         super().closeEvent(event)
 
