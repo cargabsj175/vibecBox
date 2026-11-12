@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import cast
 
 try:
-    from PyQt6.QtCore import QSettings, QSize, Qt, QT_VERSION_STR
+    from PyQt6.QtCore import QCoreApplication, QSettings, QSize, Qt, QT_VERSION_STR
     from PyQt6.QtGui import QAction, QColor, QFontDatabase, QIcon, QPainter, QPixmap
     from PyQt6.QtWidgets import (
         QAbstractItemView,
@@ -366,12 +366,16 @@ class StoragePage(QWizardPage):
     def __init__(self, wizard: "VMWizard") -> None:
         super().__init__()
         self._wizard = wizard
-        self.setTitle("Disco virtual")
-        self.setSubTitle("Se creará un disco qcow2 la primera vez que arranques la VM.")
+        self.setTitle(self.tr("Disco virtual"))
+        self.setSubTitle(
+            self.tr(
+                "Se creará un disco qcow2 la primera vez que arranques la VM."
+            )
+        )
 
         self.disk_spin = QSpinBox()
         self.disk_spin.setRange(models.MIN_DISK_GB, models.MAX_DISK_GB)
-        self.disk_spin.setSuffix(" GB")
+        self.disk_spin.setSuffix(self.tr(" GB"))
         self.disk_spin.setValue(20)
         self.disk_spin.valueChanged.connect(self._update_path)
 
@@ -383,8 +387,8 @@ class StoragePage(QWizardPage):
         )
 
         layout = QFormLayout(self)
-        layout.addRow("Tamaño:", self.disk_spin)
-        layout.addRow("Fichero:", self.path_label)
+        layout.addRow(self.tr("Tamaño:"), self.disk_spin)
+        layout.addRow(self.tr("Fichero:"), self.path_label)
 
     def initializePage(self) -> None:
         self._update_path()
@@ -404,28 +408,32 @@ class ConnectionPage(QWizardPage):
     def __init__(self, wizard: "VMWizard") -> None:
         super().__init__()
         self._wizard = wizard
-        self.setTitle("Red, vídeo y arranque")
-        self.setSubTitle("Valores VirtIO recomendados para el mejor rendimiento.")
+        self.setTitle(self.tr("Red, vídeo y arranque"))
+        self.setSubTitle(
+            self.tr("Valores VirtIO recomendados para el mejor rendimiento.")
+        )
 
         self.network = QComboBox()
-        self.network.addItem("NAT (modo usuario)", "user")
-        self.network.addItem("Puente (bridge, requiere configuración)", "bridge")
-        self.network.addItem("Sin red", "none")
+        self.network.addItem(self.tr("NAT (modo usuario)"), "user")
+        self.network.addItem(
+            self.tr("Puente (bridge, requiere configuración)"), "bridge"
+        )
+        self.network.addItem(self.tr("Sin red"), "none")
 
         self.video = QComboBox()
-        self.video.addItem("virtio-vga (recomendado)", "virtio-vga")
-        self.video.addItem("virtio-gpu", "virtio-gpu")
-        self.video.addItem("VGA estándar", "std")
+        self.video.addItem(self.tr("virtio-vga (recomendado)"), "virtio-vga")
+        self.video.addItem(self.tr("virtio-gpu"), "virtio-gpu")
+        self.video.addItem(self.tr("VGA estándar"), "std")
 
         self.boot = QComboBox()
-        self.boot.addItem("Disco duro", "disk")
-        self.boot.addItem("CD/ISO", "cdrom")
-        self.boot.addItem("Red (PXE)", "network")
+        self.boot.addItem(self.tr("Disco duro"), "disk")
+        self.boot.addItem(self.tr("CD/ISO"), "cdrom")
+        self.boot.addItem(self.tr("Red (PXE)"), "network")
 
         layout = QFormLayout(self)
-        layout.addRow("Red:", self.network)
-        layout.addRow("Vídeo:", self.video)
-        layout.addRow("Arranque:", self.boot)
+        layout.addRow(self.tr("Red:"), self.network)
+        layout.addRow(self.tr("Vídeo:"), self.video)
+        layout.addRow(self.tr("Arranque:"), self.boot)
 
     def isComplete(self) -> bool:
         return True
@@ -448,7 +456,11 @@ class VMWizard(QWizard):
         self.existing_id = existing.id if existing else None
         self.result_config: models.VMConfig | None = None
 
-        self.setWindowTitle("Editar máquina virtual" if existing else "Nueva máquina virtual")
+        self.setWindowTitle(
+            self.tr("Editar máquina virtual")
+            if existing
+            else self.tr("Nueva máquina virtual")
+        )
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
         self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
         self.resize(640, 460)
@@ -466,10 +478,16 @@ class VMWizard(QWizard):
         ):
             self.addPage(page)
 
-        self.setButtonText(QWizard.WizardButton.FinishButton, "Guardar")
-        self.setButtonText(QWizard.WizardButton.NextButton, "Siguiente")
-        self.setButtonText(QWizard.WizardButton.BackButton, "Atrás")
-        self.setButtonText(QWizard.WizardButton.CancelButton, "Cancelar")
+        self.setButtonText(
+            QWizard.WizardButton.FinishButton, self.tr("Guardar")
+        )
+        self.setButtonText(
+            QWizard.WizardButton.NextButton, self.tr("Siguiente")
+        )
+        self.setButtonText(QWizard.WizardButton.BackButton, self.tr("Atrás"))
+        self.setButtonText(
+            QWizard.WizardButton.CancelButton, self.tr("Cancelar")
+        )
 
         if existing is not None:
             self._load(existing)
@@ -530,7 +548,11 @@ class VMWizard(QWizard):
             check_paths=True,
         )
         if errors:
-            QMessageBox.warning(self, "Configuración no válida", "\n• ".join(errors))
+            QMessageBox.warning(
+                self,
+                self.tr("Configuración no válida"),
+                "\n• ".join(errors),
+            )
             return
         self.store.save(config)
         self.result_config = config
@@ -729,7 +751,9 @@ class MainWindow(QMainWindow):
         self._settings = QSettings("vibecBox", "vibecBox")
         self.runners: dict[str, runner.VMRunner] = {}
 
-        self.setWindowTitle("vibecBox — vivi is not VirtualBox")
+        self.setWindowTitle(
+            self.tr("vibecBox — vivi is not VirtualBox")
+        )
         self.resize(1080, 680)
         self.setMinimumSize(880, 520)
 
@@ -749,58 +773,90 @@ class MainWindow(QMainWindow):
 
     # -- construcción ------------------------------------------------------ #
     def _build_actions(self) -> None:
-        self.act_new = QAction(standard_icon(self, QStyle.StandardPixmap.SP_FileDialogNewFolder), "&Nueva", self)
+        self.act_new = QAction(
+            standard_icon(self, QStyle.StandardPixmap.SP_FileDialogNewFolder),
+            self.tr("&Nueva"),
+            self,
+        )
         self.act_new.setShortcut("Ctrl+N")
-        self.act_new.setStatusTip("Crear una máquina virtual")
+        self.act_new.setStatusTip(self.tr("Crear una máquina virtual"))
         self.act_new.triggered.connect(self.new_vm)
 
-        self.act_edit = QAction(standard_icon(self, QStyle.StandardPixmap.SP_FileDialogDetailedView), "&Configuración", self)
+        self.act_edit = QAction(
+            standard_icon(self, QStyle.StandardPixmap.SP_FileDialogDetailedView),
+            self.tr("&Configuración"),
+            self,
+        )
         self.act_edit.setShortcut("Ctrl+E")
-        self.act_edit.setStatusTip("Editar la máquina seleccionada")
+        self.act_edit.setStatusTip(self.tr("Editar la máquina seleccionada"))
         self.act_edit.triggered.connect(self.edit_vm)
 
-        self.act_start = QAction(standard_icon(self, QStyle.StandardPixmap.SP_MediaPlay), "&Iniciar", self)
+        self.act_start = QAction(
+            standard_icon(self, QStyle.StandardPixmap.SP_MediaPlay),
+            self.tr("&Iniciar"),
+            self,
+        )
         self.act_start.setShortcut("Ctrl+Return")
-        self.act_start.setStatusTip("Iniciar la máquina seleccionada")
+        self.act_start.setStatusTip(self.tr("Iniciar la máquina seleccionada"))
         self.act_start.triggered.connect(self.start_vm)
 
-        self.act_stop = QAction(standard_icon(self, QStyle.StandardPixmap.SP_MediaStop), "Apa&gar", self)
+        self.act_stop = QAction(
+            standard_icon(self, QStyle.StandardPixmap.SP_MediaStop),
+            self.tr("Apa&gar"),
+            self,
+        )
         self.act_stop.setShortcut("Ctrl+.")
-        self.act_stop.setStatusTip("Pedir un apagado ordenado al invitado")
+        self.act_stop.setStatusTip(
+            self.tr("Pedir un apagado ordenado al invitado")
+        )
         self.act_stop.triggered.connect(self.stop_vm)
 
-        self.act_force = QAction("Forzar parada", self)
+        self.act_force = QAction(self.tr("Forzar parada"), self)
         self.act_force.setShortcut("Ctrl+Shift+.")
-        self.act_force.setStatusTip("Terminar QEMU inmediatamente (SIGKILL)")
+        self.act_force.setStatusTip(
+            self.tr("Terminar QEMU inmediatamente (SIGKILL)")
+        )
         self.act_force.triggered.connect(self.force_stop_vm)
 
-        self.act_delete = QAction(standard_icon(self, QStyle.StandardPixmap.SP_TrashIcon), "E&liminar", self)
+        self.act_delete = QAction(
+            standard_icon(self, QStyle.StandardPixmap.SP_TrashIcon),
+            self.tr("E&liminar"),
+            self,
+        )
         self.act_delete.setShortcut("Ctrl+Delete")
-        self.act_delete.setStatusTip("Eliminar la máquina seleccionada")
+        self.act_delete.setStatusTip(
+            self.tr("Eliminar la máquina seleccionada")
+        )
         self.act_delete.triggered.connect(self.delete_vm)
 
-        self.act_refresh = QAction(standard_icon(self, QStyle.StandardPixmap.SP_BrowserReload), "A&ctualizar", self)
+        self.act_refresh = QAction(
+            standard_icon(self, QStyle.StandardPixmap.SP_BrowserReload),
+            self.tr("A&ctualizar"),
+            self,
+        )
         self.act_refresh.setShortcut("F5")
         self.act_refresh.triggered.connect(self.refresh)
 
-        self.act_diagnostics = QAction("&Diagnóstico del host", self)
+        self.act_diagnostics = QAction(
+            self.tr("&Diagnóstico del host"), self
+        )
         self.act_diagnostics.triggered.connect(self.show_diagnostics)
 
-        self.act_quit = QAction("&Salir", self)
+        self.act_quit = QAction(self.tr("&Salir"), self)
         self.act_quit.setShortcut("Ctrl+Q")
         self.act_quit.triggered.connect(self.close)
 
-        self.act_about = QAction("&Acerca de vibecBox", self)
+        self.act_about = QAction(self.tr("&Acerca de vibecBox"), self)
         self.act_about.triggered.connect(self.show_about)
 
     def _build_menus(self) -> None:
         bar = self.menuBar()
-        file_menu = bar.addMenu("&Archivo")
+        file_menu = bar.addMenu(self.tr("&Archivo"))
         file_menu.addAction(self.act_new)
         file_menu.addSeparator()
         file_menu.addAction(self.act_quit)
 
-        machine_menu = bar.addMenu("&Máquina")
+        machine_menu = bar.addMenu(self.tr("&Máquina"))
         machine_menu.addAction(self.act_edit)
         machine_menu.addAction(self.act_start)
         machine_menu.addSeparator()
@@ -809,17 +865,17 @@ class MainWindow(QMainWindow):
         machine_menu.addSeparator()
         machine_menu.addAction(self.act_delete)
 
-        view_menu = bar.addMenu("&Ver")
+        view_menu = bar.addMenu(self.tr("&Ver"))
         view_menu.addAction(self.act_refresh)
         self.view_menu = view_menu
 
-        help_menu = bar.addMenu("A&yuda")
+        help_menu = bar.addMenu(self.tr("A&yuda"))
         help_menu.addAction(self.act_diagnostics)
         help_menu.addSeparator()
         help_menu.addAction(self.act_about)
 
     def _build_toolbar(self) -> None:
-        toolbar = QToolBar("Principal", self)
+        toolbar = QToolBar(self.tr("Principal"), self)
         toolbar.setMovable(False)
         toolbar.setIconSize(QSize(18, 18))
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -836,7 +892,7 @@ class MainWindow(QMainWindow):
     def _build_central(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        left = QGroupBox("Máquinas virtuales")
+        left = QGroupBox(self.tr("Máquinas virtuales"))
         left_layout = QVBoxLayout(left)
 
         self.list = QListWidget()
@@ -846,7 +902,9 @@ class MainWindow(QMainWindow):
         self.list.itemDoubleClicked.connect(lambda _item: self.edit_vm())
 
         self.empty = QLabel(
-            "No hay máquinas virtuales.\n\nPulsa «Nueva» para crear la primera."
+            self.tr(
+                "No hay máquinas virtuales.\n\nPulsa «Nueva» para crear la primera."
+            )
         )
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.setObjectName("EmptyLabel")
@@ -862,7 +920,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.stack)
         splitter.addWidget(left)
 
-        right = QGroupBox("Detalles")
+        right = QGroupBox(self.tr("Detalles"))
         right_layout = QVBoxLayout(right)
 
         details_scroll = QScrollArea()
@@ -897,24 +955,24 @@ class MainWindow(QMainWindow):
                 Qt.TextInteractionFlag.TextSelectableByMouse
             )
             self.detail_labels[key] = value
-            self.details_form.addRow(f"{title}:", value)
+            self.details_form.addRow(self.tr(title) + ":", value)
 
         details_scroll.setWidget(details_host)
         right_layout.addWidget(details_scroll, 1)
 
         buttons = QHBoxLayout()
-        self.btn_start = QPushButton("Iniciar")
+        self.btn_start = QPushButton(self.tr("Iniciar"))
         self.btn_start.setIcon(standard_icon(self, QStyle.StandardPixmap.SP_MediaPlay))
         self.btn_start.clicked.connect(self.start_vm)
-        self.btn_stop = QPushButton("Apagar")
+        self.btn_stop = QPushButton(self.tr("Apagar"))
         self.btn_stop.setIcon(standard_icon(self, QStyle.StandardPixmap.SP_MediaStop))
         self.btn_stop.clicked.connect(self.stop_vm)
-        self.btn_force = QPushButton("Forzar")
+        self.btn_force = QPushButton(self.tr("Forzar"))
         self.btn_force.clicked.connect(self.force_stop_vm)
-        self.btn_edit = QPushButton("Configuración")
+        self.btn_edit = QPushButton(self.tr("Configuración"))
         self.btn_edit.setIcon(standard_icon(self, QStyle.StandardPixmap.SP_FileDialogDetailedView))
         self.btn_edit.clicked.connect(self.edit_vm)
-        self.btn_delete = QPushButton("Eliminar")
+        self.btn_delete = QPushButton(self.tr("Eliminar"))
         self.btn_delete.setIcon(standard_icon(self, QStyle.StandardPixmap.SP_TrashIcon))
         self.btn_delete.clicked.connect(self.delete_vm)
         buttons.addStretch(1)
@@ -939,10 +997,12 @@ class MainWindow(QMainWindow):
         )
         self.log_view.setObjectName("LogView")
         self.log_view.setPlaceholderText(
-            "Aquí aparecerá la salida de QEMU al iniciar una máquina virtual."
+            self.tr(
+                "Aquí aparecerá la salida de QEMU al iniciar una máquina virtual."
+            )
         )
 
-        clear = QPushButton("Limpiar")
+        clear = QPushButton(self.tr("Limpiar"))
         clear.clicked.connect(self.log_view.clear)
 
         container = QWidget()
@@ -951,7 +1011,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.log_view, 1)
         layout.addWidget(clear)
 
-        dock = QDockWidget("Salida de QEMU", self)
+        dock = QDockWidget(self.tr("Salida de QEMU"), self)
         dock.setObjectName("LogDock")
         dock.setAllowedAreas(
             Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
@@ -965,24 +1025,48 @@ class MainWindow(QMainWindow):
 
     def _build_statusbar(self) -> None:
         bar = self.statusBar()
-        kvm = "sí" if self.host.kvm_ok else "NO"
-        bar.addWidget(QLabel(f"KVM: {kvm}"))
-        bar.addWidget(QLabel(f"RAM: {self.host.ram_max_mb} MB"))
-        bar.addWidget(QLabel(f"CPUs: {self.host.cores_max}"))
-
-        version = (self.host.qemu_version or "QEMU no encontrado").replace(
-            "QEMU emulator version ", ""
+        kvm = self.tr("sí") if self.host.kvm_ok else self.tr("NO")
+        bar.addWidget(QLabel(self.tr("KVM: {state}").format(state=kvm)))
+        bar.addWidget(
+            QLabel(
+                self.tr("RAM: {ram} MB").format(
+                    ram=self.host.effective_ram_max_mb
+                )
+            )
         )
-        source = "PATH" if self.host.qemu_path and self.host.qemu_path.startswith("/usr") else "managed"
-        qemu_label = QLabel(f"QEMU {version} ({source})")
+        bar.addWidget(
+            QLabel(
+                self.tr("CPUs: {cores}").format(
+                    cores=self.host.effective_cores_max
+                )
+            )
+        )
+
+        version = (
+            self.host.qemu_version or self.tr("QEMU no encontrado")
+        ).replace("QEMU emulator version ", "")
+        source = (
+            self.tr("PATH")
+            if self.host.qemu_path and self.host.qemu_path.startswith("/usr")
+            else self.tr("managed")
+        )
+        qemu_label = QLabel(
+            self.tr("QEMU {version} ({source})").format(
+                version=version, source=source
+            )
+        )
         bar.addPermanentWidget(qemu_label)
 
         if self.host.display is not None and not self.host.display.has_window_backend:
-            warning = QLabel("⚠ Sin GTK/SDL: no se podrá abrir ventana")
+            warning = QLabel(
+                self.tr("⚠ Sin GTK/SDL: no se podrá abrir ventana")
+            )
             warning.setStyleSheet("color: #c0392b; font-weight: 600;")
             warning.setToolTip(
-                "El QEMU resuelto es headless. Instala QEMU de la distro para "
-                "poder abrir la ventana de la VM en la Etapa 4."
+                self.tr(
+                    "El QEMU resuelto es headless. Instala QEMU de la distro "
+                    "para poder abrir la ventana de la VM en la Etapa 4."
+                )
             )
             bar.addPermanentWidget(warning)
 
@@ -994,9 +1078,18 @@ class MainWindow(QMainWindow):
         vms = self.store.list()
         self.list.clear()
         for vm in vms:
-            item = QListWidgetItem(state_icon(vm.state), f"{vm.name}   ·   {vm.state.label}")
+            item = QListWidgetItem(
+                state_icon(vm.state),
+                self.tr("{name}   ·   {state}").format(
+                    name=vm.name, state=self.tr(vm.state.label)
+                ),
+            )
             item.setData(Qt.ItemDataRole.UserRole, vm.id)
-            item.setToolTip(f"{vm.ram_mb} MB · {vm.vcpus} vCPU · {vm.disk_gb} GB")
+            item.setToolTip(
+                self.tr("{ram} MB · {vcpus} vCPU · {disk} GB").format(
+                    ram=vm.ram_mb, vcpus=vm.vcpus, disk=vm.disk_gb
+                )
+            )
             self.list.addItem(item)
 
         self._stack_layout.setCurrentWidget(self.list if vms else self.empty)
@@ -1007,7 +1100,10 @@ class MainWindow(QMainWindow):
             self.list.setCurrentRow(0)
 
         self._update_actions()
-        self.statusBar().showMessage(f"{len(vms)} máquina(s) virtual(es)", 4000)
+        self.statusBar().showMessage(
+            self.tr("{count} máquina(s) virtual(es)").format(count=len(vms)),
+            4000,
+        )
 
     def selected_vm(self) -> models.VMConfig | None:
         item = self.list.currentItem()
@@ -1063,20 +1159,22 @@ class MainWindow(QMainWindow):
             return
 
         network = {
-            "user": "NAT (modo usuario)",
-            "bridge": "Puente (bridge)",
-            "none": "Sin red",
+            "user": self.tr("NAT (modo usuario)"),
+            "bridge": self.tr("Puente (bridge)"),
+            "none": self.tr("Sin red"),
         }.get(vm.network, vm.network)
-        boot = {"disk": "Disco duro", "cdrom": "CD/ISO", "network": "Red (PXE)"}.get(
-            vm.boot_order, vm.boot_order
-        )
+        boot = {
+            "disk": self.tr("Disco duro"),
+            "cdrom": self.tr("CD/ISO"),
+            "network": self.tr("Red (PXE)"),
+        }.get(vm.boot_order, vm.boot_order)
 
         values = {
             "name": vm.name,
-            "state": vm.state.label,
-            "ram": f"{vm.ram_mb} MB",
-            "vcpus": f"{vm.vcpus} vCPU",
-            "disk": f"{vm.disk_gb} GB (qcow2)",
+            "state": self.tr(vm.state.label),
+            "ram": self.tr("{ram} MB").format(ram=vm.ram_mb),
+            "vcpus": self.tr("{vcpus} vCPU").format(vcpus=vm.vcpus),
+            "disk": self.tr("{disk} GB (qcow2)").format(disk=vm.disk_gb),
             "disk_path": str(vm.resolved_disk_path()),
             "iso": vm.iso_path or "—",
             "network": network,
@@ -1101,7 +1199,8 @@ class MainWindow(QMainWindow):
             return
         if self._is_running(vm.id):
             self.statusBar().showMessage(
-                "Apaga la máquina antes de cambiar su configuración.", 5000
+                self.tr("Apaga la máquina antes de cambiar su configuración."),
+                5000,
             )
             return
         wizard = VMWizard(self.store, self.host, self, existing=vm)
@@ -1115,14 +1214,16 @@ class MainWindow(QMainWindow):
             return
         if self._is_running(vm.id):
             self.statusBar().showMessage(
-                "Apaga la máquina antes de eliminarla.", 5000
+                self.tr("Apaga la máquina antes de eliminarla."), 5000
             )
             return
         answer = QMessageBox.question(
             self,
-            "Eliminar máquina virtual",
-            f"¿Eliminar «{vm.name}»?\n\nSe borrará su configuración. "
-            "El disco qcow2 no se elimina automáticamente.",
+            self.tr("Eliminar máquina virtual"),
+            self.tr(
+                "¿Eliminar «{name}»?\n\nSe borrará su configuración. "
+                "El disco qcow2 no se elimina automáticamente."
+            ).format(name=vm.name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1142,20 +1243,24 @@ class MainWindow(QMainWindow):
         if self.host.display is None or not self.host.display.probed:
             QMessageBox.warning(
                 self,
-                "No se pudo comprobar el vídeo",
-                "No se pudo consultar `-display help` en el QEMU resuelto.\n"
-                "Instala QEMU de la distro y vuelve a intentarlo.",
+                self.tr("No se pudo comprobar el vídeo"),
+                self.tr(
+                    "No se pudo consultar `-display help` en el QEMU resuelto.\n"
+                    "Instala QEMU de la distro y vuelve a intentarlo."
+                ),
             )
             return
 
         if not self.host.display.has_window_backend:
             QMessageBox.warning(
                 self,
-                "QEMU sin ventana nativa",
-                "El QEMU resuelto no incluye GTK ni SDL, así que no puede abrir "
-                "su propia ventana.\n\n"
-                "Instala QEMU de la distro (con GTK/SDL) o define un binario "
-                "con backend de ventana.",
+                self.tr("QEMU sin ventana nativa"),
+                self.tr(
+                    "El QEMU resuelto no incluye GTK ni SDL, así que no puede "
+                    "abrir su propia ventana.\n\n"
+                    "Instala QEMU de la distro (con GTK/SDL) o define un binario "
+                    "con backend de ventana."
+                ),
             )
             return
 
@@ -1167,8 +1272,10 @@ class MainWindow(QMainWindow):
         except (qemu.DiskError, core.VibecBoxError) as exc:
             QMessageBox.critical(
                 self,
-                "No se pudo preparar el disco",
-                f"La máquina «{vm.name}» no puede arrancar:\n\n{exc}",
+                self.tr("No se pudo preparar el disco"),
+                self.tr(
+                    "La máquina «{name}» no puede arrancar:\n\n{error}"
+                ).format(name=vm.name, error=exc),
             )
             return
 
@@ -1180,10 +1287,16 @@ class MainWindow(QMainWindow):
         self.runners[vm.id] = active
 
         self.statusBar().showMessage(
-            f"Iniciando «{vm.name}» con {display.split(',')[0].upper()}…", 5000
+            self.tr("Iniciando «{name}» con {display}…").format(
+                name=vm.name, display=display.split(",")[0].upper()
+            ),
+            5000,
         )
         self.log_view.appendPlainText(
-            runner.format_log_line(vm.name, f"Disco listo: {disk}")
+            runner.format_log_line(
+                vm.name,
+                self.tr("Disco listo: {path}").format(path=disk),
+            )
         )
         active.start()
         self._update_actions()
@@ -1197,7 +1310,10 @@ class MainWindow(QMainWindow):
             return
         active.stop(graceful=True)
         self.statusBar().showMessage(
-            f"Apagado ordenado solicitado a «{vm.name}»…", 5000
+            self.tr("Apagado ordenado solicitado a «{name}»…").format(
+                name=vm.name
+            ),
+            5000,
         )
         self._update_actions()
 
@@ -1210,24 +1326,32 @@ class MainWindow(QMainWindow):
             return
         answer = QMessageBox.question(
             self,
-            "Forzar parada",
-            f"¿Terminar «{vm.name}» inmediatamente?\n\n"
-            "Se enviará SIGKILL a QEMU: el invitado no podrá cerrar sus "
-            "ficheros de forma ordenada y el disco puede quedar inconsistente.",
+            self.tr("Forzar parada"),
+            self.tr(
+                "¿Terminar «{name}» inmediatamente?\n\n"
+                "Se enviará SIGKILL a QEMU: el invitado no podrá cerrar sus "
+                "ficheros de forma ordenada y el disco puede quedar "
+                "inconsistente."
+            ).format(name=vm.name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
         active.force_kill()
-        self.statusBar().showMessage(f"Forzando parada de «{vm.name}»…", 5000)
+        self.statusBar().showMessage(
+            self.tr("Forzando parada de «{name}»…").format(name=vm.name),
+            5000,
+        )
         self._update_actions()
 
     # -- señales del runner ------------------------------------------------ #
     def _on_vm_started(self, vm_id: str) -> None:
         vm = self.store.get(vm_id)
         if vm is not None:
-            self.statusBar().showMessage(f"«{vm.name}» en ejecución.", 5000)
+            self.statusBar().showMessage(
+                self.tr("«{name}» en ejecución.").format(name=vm.name), 5000
+            )
         self.refresh()
 
     def _on_vm_state(self, vm_id: str, state: models.VMState) -> None:
@@ -1255,7 +1379,10 @@ class MainWindow(QMainWindow):
         vm = self.store.get(vm_id)
         if vm is not None:
             self.statusBar().showMessage(
-                f"«{vm.name}» terminó con estado {state.label}.", 6000
+                self.tr("«{name}» terminó con estado {state}.").format(
+                    name=vm.name, state=self.tr(state.label)
+                ),
+                6000,
             )
         self.refresh()
 
@@ -1265,12 +1392,16 @@ class MainWindow(QMainWindow):
     def show_about(self) -> None:
         QMessageBox.about(
             self,
-            "Acerca de vibecBox",
-            "<h3>vibecBox</h3>"
-            "<p><i>vivi is not VirtualBox</i></p>"
-            "<p>GUI de escritorio que imita a VirtualBox y ejecuta QEMU/KVM "
-            "nativo, sin libvirt y sin VNC/SPICE embebido.</p>"
-            f"<p>Qt {QT_VERSION_STR} · Python {sys.version.split()[0]}</p>",
+            self.tr("Acerca de vibecBox"),
+            self.tr(
+                "<h3>vibecBox</h3>"
+                "<p><i>vivi is not VirtualBox</i></p>"
+                "<p>GUI de escritorio que imita a VirtualBox y ejecuta "
+                "QEMU/KVM nativo, sin libvirt y sin VNC/SPICE embebido.</p>"
+            )
+            + self.tr("<p>Qt {qt} · Python {python}</p>").format(
+                qt=QT_VERSION_STR, python=sys.version.split()[0]
+            ),
         )
 
     # -- ciclo de vida ----------------------------------------------------- #
@@ -1316,9 +1447,12 @@ def _check_qt_version() -> str | None:
     except ValueError:
         return None
     if parts < MIN_QT_VERSION:
-        return (
-            f"Se requiere Qt {'.'.join(map(str, MIN_QT_VERSION))} o superior; "
-            f"encontrado {QT_VERSION_STR}."
+        return QCoreApplication.translate(
+            "main",
+            "Se requiere Qt {required} o superior; encontrado {found}.",
+        ).format(
+            required=".".join(map(str, MIN_QT_VERSION)),
+            found=QT_VERSION_STR,
         )
     return None
 
@@ -1335,7 +1469,11 @@ def main(argv: list[str] | None = None) -> int:
 
     problem = _check_qt_version()
     if problem:
-        QMessageBox.critical(None, "Versión de Qt no compatible", problem)
+        QMessageBox.critical(
+            None,
+            QCoreApplication.translate("main", "Versión de Qt no compatible"),
+            problem,
+        )
         return 2
 
     host = load_host_info()
