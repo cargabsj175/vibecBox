@@ -103,6 +103,27 @@ def main(argv: list[str] | None = None) -> int:
             iso_errors[0] if iso_errors else "no detectado",
         )
 
+        name_helper = models.name_errors("")
+        duplicate_helper = models.name_errors(
+            "Prueba Etapa 2", existing_names=["prueba etapa 2"]
+        )
+        forbidden_helper = models.name_errors("ruta/inválida")
+        check(
+            OK
+            if name_helper and duplicate_helper and forbidden_helper
+            else FAIL,
+            "Helpers de validación",
+            "nombre vacío, duplicado y prohibido detectados",
+        )
+        check(
+            OK
+            if models.iso_path_errors("/no/existe.iso")
+            and not models.iso_path_errors(None)
+            else FAIL,
+            "Helper ISO",
+            "inexistente detectada; sin ISO válida",
+        )
+
         # ---------------------------------------------------------------- #
         # 2. Persistencia
         # ---------------------------------------------------------------- #
@@ -250,6 +271,364 @@ def main(argv: list[str] | None = None) -> int:
             OK if not wizard_errors else FAIL,
             "Asistente configuración",
             f"{config.ram_mb} MB · {config.vcpus} vCPU · {config.network}",
+        )
+
+        # ---------------------------------------------------------------- #
+        # 4. Validación en la página, degradación y aceptación
+        # ---------------------------------------------------------------- #
+        good_iso = tmp_path / "instalacion.iso"
+        good_iso.write_bytes(b"")
+        wrong_iso = tmp_path / "instalacion.txt"
+        wrong_iso.write_bytes(b"")
+
+        page = wizard.name_page
+        page.name_edit.setText("VM con ISO")
+        page.iso_edit.setText("/no/existe.iso")
+        check(
+            OK
+            if not page.isComplete() and "/no/existe.iso" in page.hint.text()
+            else FAIL,
+            "ISO inexistente en página",
+            page.hint.text(),
+        )
+        page.iso_edit.setText(str(wrong_iso))
+        check(
+            OK
+            if not page.isComplete() and "extensión" in page.hint.text()
+            else FAIL,
+            "ISO con extensión incorrecta",
+            page.hint.text(),
+        )
+        page.iso_edit.setText(str(good_iso))
+        check(
+            OK if page.isComplete() else FAIL,
+            "ISO válida en página",
+            str(good_iso),
+        )
+
+        page.iso_edit.clear()
+        page.hint.setText("centinela")
+        pure = page.isComplete()
+        check(
+            OK if pure and page.hint.text() == "centinela" else FAIL,
+            "isComplete sin efectos",
+            "hint intacto",
+        )
+
+        changes: list[int] = []
+        page.completeChanged.connect(lambda: changes.append(1))
+        page.name_edit.setText("VM con ISO renombrada")
+        check(
+            OK if changes and "ISO es opcional" in page.hint.text() else FAIL,
+            "Hint actualizado por señal",
+            page.hint.text(),
+        )
+
+        warnings: list[tuple[str, str]] = []
+        original_warning = gui.QMessageBox.warning
+
+        def fake_warning(_parent, title, text, *args, **kwargs):
+            warnings.append((str(title), str(text)))
+            return gui.QMessageBox.StandardButton.Ok
+
+        gui.QMessageBox.warning = fake_warning
+        try:
+            page.name_edit.setText("VM aceptada")
+            page.iso_edit.setText("/no/existe.iso")
+            wizard.accept()
+        finally:
+            gui.QMessageBox.warning = original_warning
+        check(
+            OK
+            if wizard.result_config is None
+            and warnings
+            and "ISO" in warnings[-1][1]
+            else FAIL,
+            "accept rechaza ISO rota",
+            warnings[-1][1] if warnings else "sin aviso",
+        )
+
+        warnings.clear()
+        gui.QMessageBox.warning = fake_warning
+        try:
+            page.iso_edit.clear()
+            wizard.accept()
+        finally:
+            gui.QMessageBox.warning = original_warning
+        accepted = wizard.result_config
+        check(
+            OK
+            if accepted is not None
+            and not warnings
+            and store.get(accepted.id) is not None
+            else FAIL,
+            "accept guarda VM válida",
+            accepted.name if accepted else "no aceptada",
+        )
+        if accepted is not None:
+            store.delete(accepted.id)
+
+        # Edición de una VM existente.
+        existing = models.VMConfig(
+            name="VM existente",
+            ram_mb=1536,
+            vcpus=3,
+            disk_gb=40,
+            iso_path=str(good_iso),
+            network="bridge",
+            video="virtio-gpu",
+            boot_order="cdrom",
+        )
+        store.save(existing)
+        edit = gui.VMWizard(store, host, window, existing=existing)
+        check(
+            OK
+            if edit.name_page.name_edit.text() == existing.name
+            and edit.resources_page.ram_spin.value() == 1536
+            and edit.resources_page.cpu_spin.value() == 3
+            and edit.storage_page.disk_spin.value() == 40
+            and edit.connection_page.network.currentData() == "bridge"
+            and edit.connection_page.video.currentData() == "virtio-gpu"
+            and edit.connection_page.boot.currentData() == "cdrom"
+            else FAIL,
+            "Wizard _load",
+            "nombre, recursos, disco y conexión restaurados",
+        )
+        check(
+            OK
+            if edit.existing_id == existing.id and edit.name_page.isComplete()
+            else FAIL,
+            "Wizard _load nombre excluido",
+            "el nombre propio no bloquea la edición",
+        )
+        rebuilt = edit._build_config()
+        check(
+            OK
+            if rebuilt.id == existing.id
+            and rebuilt.iso_path == str(good_iso)
+            and rebuilt.network == "bridge"
+            else FAIL,
+            "Wizard _build_config conserva id",
+            rebuilt.id,
+        )
+        store.delete(existing.id)
+
+        # Host con capacidades degradadas.
+        degraded_host = gui.HostInfo(
+            ram_max_mb=0,
+            cores_max=0,
+            kvm_ok=False,
+            qemu_path=None,
+            qemu_version=None,
+            img_version=None,
+            display=None,
+            ram_error="MemTotal ilegible en /proc/meminfo",
+        )
+        degraded = gui.VMWizard(store, degraded_host, window)
+        resources = degraded.resources_page
+        check(
+            OK
+            if resources.ram_spin.minimum() <= resources.ram_spin.maximum()
+            and resources.ram_spin.maximum() == gui.DEFAULT_RAM_MAX_MB
+            and resources.cpu_spin.minimum() <= resources.cpu_spin.maximum()
+            and resources.cpu_spin.maximum() == 1
+            else FAIL,
+            "Recursos degradados",
+            f"RAM máx {resources.ram_spin.maximum()} MB · "
+            f"CPU máx {resources.cpu_spin.maximum()}",
+        )
+        check(
+            OK
+            if resources.warning is not None
+            and "MemTotal" in resources.warning.text()
+            else FAIL,
+            "Aviso de degradación",
+            resources.warning.text() if resources.warning else "sin aviso",
+        )
+        degraded._load(models.VMConfig(name="VM degradada", ram_mb=2048, vcpus=4))
+        check(
+            OK
+            if resources.ram_spin.value() == 2048
+            and resources.cpu_spin.value() == 1
+            else FAIL,
+            "Recursos degradados en _load",
+            f"{resources.ram_spin.value()} MB · "
+            f"{resources.cpu_spin.value()} vCPU",
+        )
+
+        degraded_warnings: list[str] = []
+        gui.QMessageBox.warning = (
+            lambda _parent, _title, text, *args, **kwargs: (
+                degraded_warnings.append(str(text))
+                or gui.QMessageBox.StandardButton.Ok
+            )
+        )
+        try:
+            degraded.name_page.name_edit.setText("VM host degradado")
+            degraded.accept()
+        finally:
+            gui.QMessageBox.warning = original_warning
+        degraded_config = degraded.result_config
+        check(
+            OK
+            if degraded_config is not None
+            and not degraded_warnings
+            and store.get(degraded_config.id) is not None
+            else FAIL,
+            "accept con host degradado",
+            degraded_config.name if degraded_config else "no aceptada",
+        )
+        if degraded_config is not None:
+            store.delete(degraded_config.id)
+
+        # Diagnóstico reutilizando environment_snapshot().
+        snapshot = {
+            "app": "vibecBox",
+            "python": "3.14.0",
+            "platform": "Linux-de-prueba",
+            "bin_dir": str(tmp_path / "bin"),
+            "bin_dir_exists": False,
+            "kvm": core.KvmStatus("/dev/kvm", True, True, True, True, "kvm"),
+            "ram_max_mb": 8192,
+            "cores_max": 4,
+            "binaries": {
+                core.QEMU_SYSTEM: core.BinaryStatus(
+                    core.QEMU_SYSTEM,
+                    "/usr/bin/qemu-system-x86_64",
+                    "PATH",
+                    "QEMU emulator version 11.0.0",
+                ),
+                core.QEMU_IMG: core.BinaryStatus(
+                    core.QEMU_IMG, None, "missing", None
+                ),
+            },
+            "qemu_display": core.DisplaySupport(
+                frozenset({"gtk", "sdl"}), True
+            ),
+        }
+        dialog = gui.DiagnosticsDialog(host, window, snapshot=snapshot)
+        check(
+            OK
+            if "8192 MB" in dialog.report_text
+            and "/dev/kvm" in dialog.report_text
+            and "gtk" in dialog.report_text
+            and "11.0.0" in dialog.report_text
+            and dialog.copy_button is not None
+            else FAIL,
+            "Diagnóstico con snapshot",
+            "RAM, KVM, vídeo y versión presentes",
+        )
+        dialog._copy()
+        check(
+            OK
+            if QApplication.clipboard().text() == dialog.report_text
+            else FAIL,
+            "Diagnóstico copiar",
+            f"{len(dialog.report_text)} caracteres",
+        )
+
+        degraded_snapshot = dict(snapshot)
+        degraded_snapshot["ram_max_mb"] = None
+        degraded_snapshot["qemu_display"] = None
+        degraded_dialog = gui.DiagnosticsDialog(
+            degraded_host, window, snapshot=degraded_snapshot
+        )
+        check(
+            OK
+            if "no disponible" in degraded_dialog.report_text
+            and "MemTotal ilegible" in degraded_dialog.report_text
+            else FAIL,
+            "Diagnóstico degradado",
+            "RAM no disponible con aviso",
+        )
+        dialog.deleteLater()
+        degraded_dialog.deleteLater()
+
+        # Cierre ordenado: QMP/SIGTERM antes de SIGKILL.
+        from PyQt6.QtGui import QCloseEvent
+
+        events: list[tuple[str, object]] = []
+
+        class _FakeClosingRunner:
+            def __init__(self, stops: bool) -> None:
+                self.stops = stops
+                self.running = True
+                self.killed = False
+
+            @property
+            def is_running(self) -> bool:
+                return self.running
+
+            def stop(self, *, graceful: bool = True) -> None:
+                events.append(("stop", graceful))
+
+            def wait_for_finished(self, timeout_ms: int = 3000) -> bool:
+                events.append(("wait", timeout_ms))
+                if self.stops and not self.killed:
+                    self.running = False
+                return True
+
+            def force_kill(self) -> None:
+                events.append(("kill", self.stops))
+                self.killed = True
+                self.running = False
+
+        close_window = gui.MainWindow(host, store)
+        close_window.runners = {
+            "graceful": _FakeClosingRunner(True),
+            "stubborn": _FakeClosingRunner(False),
+        }
+        old_grace = gui.CLOSE_GRACEFUL_TIMEOUT_MS
+        old_kill = gui.CLOSE_KILL_TIMEOUT_MS
+        gui.CLOSE_GRACEFUL_TIMEOUT_MS = 150
+        gui.CLOSE_KILL_TIMEOUT_MS = 150
+        try:
+            close_window.closeEvent(QCloseEvent())
+        finally:
+            gui.CLOSE_GRACEFUL_TIMEOUT_MS = old_grace
+            gui.CLOSE_KILL_TIMEOUT_MS = old_kill
+        stops = [event for event in events if event[0] == "stop"]
+        kills = [event for event in events if event[0] == "kill"]
+        kill_index = (
+            events.index(("kill", False))
+            if ("kill", False) in events
+            else len(events)
+        )
+        check(
+            OK
+            if len(stops) == 2
+            and all(event[1] is True for event in stops)
+            and len(kills) == 1
+            and kills[0][1] is False
+            and ("wait", gui._WAIT_SLICE_MS) in events[:kill_index]
+            and not close_window.runners
+            else FAIL,
+            "closeEvent ordenado",
+            f"{len(stops)} stop · {len(kills)} SIGKILL",
+        )
+        close_window.deleteLater()
+
+        # CLI y logging persistente.
+        log_path = gui._log_file_path()
+        options, qt_args = gui._parse_cli_args(
+            ["-v", "-platform", "offscreen"]
+        )
+        check(
+            OK
+            if options.verbose
+            and qt_args == ["-platform", "offscreen"]
+            and log_path.parent == core.data_home()
+            else FAIL,
+            "CLI y ruta de log",
+            str(log_path),
+        )
+        configured = gui._configure_logging(False)
+        check(
+            OK
+            if configured is not None and configured.exists()
+            else FAIL,
+            "Log a fichero",
+            str(configured),
         )
 
         deleted = app is not None
