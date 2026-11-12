@@ -11,10 +11,12 @@ Ejecutar:
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 import time
 from dataclasses import dataclass
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import cast
 
@@ -73,6 +75,9 @@ DEFAULT_RAM_MAX_MB = 4096
 CLOSE_GRACEFUL_TIMEOUT_MS = 2000
 CLOSE_KILL_TIMEOUT_MS = 2000
 _WAIT_SLICE_MS = 50
+LOG_FILE_NAME = "vibecBox.log"
+LOG_FILE_MAX_BYTES = 1_048_576
+LOG_FILE_BACKUPS = 3
 STATE_COLORS = {
     models.VMState.STOPPED: "#8a94a6",
     models.VMState.RUNNING: "#2e9e5b",
@@ -1457,12 +1462,68 @@ def _check_qt_version() -> str | None:
     return None
 
 
-def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s"
+def _log_file_path() -> Path:
+    """Ruta del log persistente bajo el directorio de datos de la app."""
+    return core.data_home() / LOG_FILE_NAME
+
+
+def _configure_logging(verbose: bool) -> Path | None:
+    """Configura consola y log rotado; devuelve la ruta del fichero o ``None``."""
+    console = logging.StreamHandler()
+    console.setLevel(logging.DEBUG if verbose else logging.WARNING)
+    console.setFormatter(
+        logging.Formatter("%(levelname)s %(name)s: %(message)s")
     )
 
-    app = QApplication(argv if argv is not None else sys.argv)
+    log_path = _log_file_path()
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_path,
+            maxBytes=LOG_FILE_MAX_BYTES,
+            backupCount=LOG_FILE_BACKUPS,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logging.basicConfig(
+            level=logging.DEBUG, handlers=[console], force=True
+        )
+        LOG.warning("No se pudo abrir el log en fichero: %s", exc)
+        return None
+
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    logging.basicConfig(
+        level=logging.DEBUG, handlers=[console, file_handler], force=True
+    )
+    LOG.info("Registro en %s", log_path)
+    return log_path
+
+
+def _parse_cli_args(
+    argv: list[str] | None,
+) -> tuple[argparse.Namespace, list[str]]:
+    """Separa las opciones de vibecBox de los argumentos que consume Qt."""
+    parser = argparse.ArgumentParser(
+        prog="vibecBox",
+        description="GUI de vibecBox para ejecutar QEMU/KVM nativo.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="muestra también los logs DEBUG en la consola",
+    )
+    return parser.parse_known_args(sys.argv[1:] if argv is None else argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    options, qt_args = _parse_cli_args(argv)
+    _configure_logging(options.verbose)
+
+    app = QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("vibecBox")
     app.setApplicationDisplayName("vibecBox")
     app.setStyleSheet(STYLE)
