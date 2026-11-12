@@ -74,6 +74,38 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def name_errors(
+    name: str, *, existing_names: Iterable[str] = ()
+) -> list[str]:
+    """Errores del nombre de una VM (lista vacía si es válido)."""
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return ["El nombre no puede estar vacío."]
+    if len(cleaned) > MAX_NAME_LENGTH:
+        return [f"El nombre no puede superar {MAX_NAME_LENGTH} caracteres."]
+    if any(ch in cleaned for ch in _NAME_FORBIDDEN):
+        return ["El nombre no puede contener '/', '\\' ni caracteres nulos."]
+    if cleaned.lower() in {other.strip().lower() for other in existing_names}:
+        return [f"Ya existe una VM llamada «{cleaned}»."]
+    return []
+
+
+def iso_path_errors(
+    iso_path: str | None, *, check_paths: bool = False
+) -> list[str]:
+    """Errores de la ISO indicada (lista vacía si no hay ISO o es válida)."""
+    if not iso_path:
+        return []
+    iso = Path(iso_path).expanduser()
+    if not iso.exists():
+        return [f"La ISO no existe: {iso}"]
+    if not iso.is_file():
+        return [f"La ISO no es un fichero: {iso}"]
+    if check_paths and iso.suffix.lower() != ".iso":
+        return ["El fichero de instalación debería tener extensión .iso."]
+    return []
+
+
 @dataclass
 class VMConfig:
     """Definición declarativa de una VM. No conoce QEMU ni Qt."""
@@ -115,16 +147,7 @@ class VMConfig:
     ) -> list[str]:
         """Devuelve la lista de errores; vacía si la configuración es válida."""
         errors: list[str] = []
-        name = (self.name or "").strip()
-
-        if not name:
-            errors.append("El nombre no puede estar vacío.")
-        elif len(name) > MAX_NAME_LENGTH:
-            errors.append(f"El nombre no puede superar {MAX_NAME_LENGTH} caracteres.")
-        elif any(ch in name for ch in _NAME_FORBIDDEN):
-            errors.append("El nombre no puede contener '/', '\\' ni caracteres nulos.")
-        elif name.lower() in {other.strip().lower() for other in existing_names}:
-            errors.append(f"Ya existe una VM llamada «{name}».")
+        errors.extend(name_errors(self.name, existing_names=existing_names))
 
         if not isinstance(self.ram_mb, int):
             errors.append("La RAM debe ser un número entero de MB.")
@@ -153,13 +176,9 @@ class VMConfig:
             errors.append(f"Orden de arranque inválido: {self.boot_order!r}.")
 
         if self.iso_path:
-            iso = Path(self.iso_path).expanduser()
-            if not iso.exists():
-                errors.append(f"La ISO no existe: {iso}")
-            elif not iso.is_file():
-                errors.append(f"La ISO no es un fichero: {iso}")
-            elif check_paths and iso.suffix.lower() != ".iso":
-                errors.append("El fichero de instalación debería tener extensión .iso.")
+            errors.extend(
+                iso_path_errors(self.iso_path, check_paths=check_paths)
+            )
 
         return errors
 
@@ -308,5 +327,7 @@ __all__ = [
     "VMState",
     "VMStore",
     "VMValidationError",
+    "iso_path_errors",
+    "name_errors",
     "slugify",
 ]
