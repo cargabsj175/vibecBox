@@ -1,25 +1,28 @@
 # Memory.md — Roadmap y estado de vibecBox
 
 > Fuente de verdad del progreso. Actualizar al cerrar cada tarea.
-> Última actualización: 2026-11-06
+> Última actualización: 2026-11-12
 
 ## 0. Snapshot del host de desarrollo
 
 | Dato | Valor |
 |---|---|
 | SO / arquitectura | Linux x86_64 |
-| Python | 3.14.0 (`/usr/bin/python3`) |
+| Python | 3.14.6 (`/usr/bin/python3`) |
 | RAM total | 32 779 624 kB ≈ **32 011 MB** (31,3 GiB) |
 | CPUs lógicas | **16** (`os.cpu_count()`) |
 | `/dev/kvm` | presente, `crw-rw----+ root:kvm`; ACL concede r/w al usuario |
-| `qemu-system-x86_64` | **PATH** `/usr/bin` (11.0.0, GTK/SDL/egl-headless/dbus); el gestionado queda como fallback |
-| `qemu-img` | **PATH** `/usr/bin` (11.0.0) |
+| `qemu-system-x86_64` | **managed** `~/.local/share/vibecBox/bin/` (11.0.0, headless); el QEMU de distro `/usr/bin` ya no está instalado en este host |
+| `qemu-img` | **managed** `~/.local/share/vibecBox/bin/` (11.0.0) |
 | `~/.local/share/vibecBox/bin/` | existe; fallback `static-pie` (headless) de la Etapa 1 |
 | PyQt6 | **6.12.0** en `.venv` (creado con `--system-site-packages`) |
 
-Consecuencia: el PATH gana (QEMU de distro con GTK/SDL) y el directorio
-gestionado queda como fallback. La GUI usa el Qt6 del venv; si la distro publica
-un PyQt6 para Python 3.14, el venv lo verá gracias a `--system-site-packages`.
+> **Cambio de entorno (2026-11-12):** el QEMU de distro con GTK/SDL que se usó
+> para verificar la ventana nativa ya no está en `/usr/bin`. El backend resuelve
+> el binario gestionado (headless), por lo que `test_core` marca el WARN de vídeo
+> y las pruebas con ventana real quedan pendientes de reinstalar QEMU de distro.
+> Los tests de argumentos y del runner se ejecutan con
+> `VIBECBOX_BIN_DIR=~/.local/share/vibecBox/bin`.
 
 ## 1. Etapas
 
@@ -267,6 +270,45 @@ QEMU terminó (código 9, proceso terminado por señal).
 el proceso, la ventana GTK, QMP y las transiciones, no el apagado ordenado
 dentro de un Linux invitado (el camino se ejercita con la caída a `SIGTERM`).
 
+### Etapa 4.1 — Endurecimiento del asistente y ciclo de vida `[COMPLETADA 2026-11-12]`
+
+**Objetivo:** madurar lo ya construido sin añadir funcionalidad nueva:
+validación única, diagnóstico reutilizable, cierre ordenado, logging y i18n.
+
+- [x] `models.name_errors()`/`models.iso_path_errors()`; `VMConfig.validate()`
+      delega en ellos y la GUI también (sin reglas duplicadas).
+- [x] `NamePage.isComplete()` sin efectos secundarios: el hint se actualiza
+      desde `textChanged` y refleja también los errores de ISO.
+- [x] `ResourcesPage` degrada a `4096 MB` / `1 vCPU` con aviso si el host
+      devuelve capacidades inválidas.
+- [x] `DiagnosticsDialog` reutiliza `core.environment_snapshot()` y ofrece
+      «Copiar» al portapapeles.
+- [x] `closeEvent`: `stop(graceful=True)` con espera acotada y `force_kill()`
+      solo como último recurso.
+- [x] `--verbose/-v` y log rotado en `<data_home>/vibecBox.log`.
+- [x] Textos de UI envueltos en `tr()` (sin traducción real todavía).
+
+**Evidencia (2026-11-12):**
+
+```text
+$ python3 test_core.py
+Resultado: 9 OK · 1 WARN · 0 FAIL
+
+$ VIBECBOX_BIN_DIR=~/.local/share/vibecBox/bin python3 test_qemu.py
+Resultado: 24 OK · 0 WARN · 0 FAIL
+
+$ QT_QPA_PLATFORM=offscreen .venv/bin/python test_gui.py
+Resultado: 43 OK · 0 WARN · 0 FAIL
+
+$ VIBECBOX_BIN_DIR=~/.local/share/vibecBox/bin \
+    QT_QPA_PLATFORM=offscreen .venv/bin/python test_runner.py
+Resultado: 9 OK · 0 WARN · 0 FAIL
+```
+
+El WARN de `test_core` es el QEMU gestionado headless (sin GTK/SDL), coherente
+con el cambio de entorno anotado arriba. Los tests de GUI pasaron de 21 a 43
+casos.
+
 ## 2. Backlog / riesgos
 
 - Build propio estático con SDL2 (Alpine/musl) si se exige cero instalación;
@@ -318,6 +360,22 @@ dentro de un Linux invitado (el camino se ejercita con la caída a `SIGTERM`).
   antes de QMP/SIGTERM/SIGKILL; un código de salida distinto de cero por esas
   señales se presenta como `stopped`. Solo un fallo no solicitado
   (`FailedToStart` o caída inesperada) queda en `error`.
+- **ADR-014 — Validación única en el modelo.** `models.name_errors()` y
+  `models.iso_path_errors()` concentran las reglas; `VMConfig.validate()` y el
+  asistente las consumen. La GUI no reimplementa comprobaciones para que ambas
+  capas no puedan divergir.
+- **ADR-015 — Degradación segura, no bloqueo.** Si `ram_max_mb`/`cores_max` no
+  son válidos, `HostInfo` expone `effective_ram_max_mb=4096` y
+  `effective_cores_max=1`, avisa en el asistente y permite continuar. Un fallo
+  de lectura del host no debe impedir crear una VM.
+- **ADR-016 — Cierre ordenado acotado.** Al salir, `closeEvent` pide
+  `stop(graceful=True)` a cada runner, espera 2 s procesando eventos (para que
+  QMP responda) y solo entonces envía `SIGKILL` a los que sigan vivos, con otros
+  2 s de espera. Se evita tanto el corte brusco como un cierre infinito.
+- **ADR-017 — Log persistente y argumentos de Qt separados.** `--verbose/-v`
+  controla el nivel de consola; el fichero `<data_home>/vibecBox.log` usa
+  `RotatingFileHandler` (1 MiB × 3) siempre en DEBUG. `parse_known_args()`
+  separa las opciones propias de las que consume Qt (`-platform`, `-style`).
 
 ## 4. Próximos pasos
 
@@ -327,5 +385,9 @@ dentro de un Linux invitado (el camino se ejercita con la caída a `SIGTERM`).
 4. ~~Instalar PyQt6 y abrir la Etapa 2.~~ Hecho (PyQt6 6.12 en `.venv`).
 5. ~~Etapa 3: `build_args(VMConfig)` + creación de discos con `qemu-img`.~~ Hecho.
 6. ~~Etapa 4: `QProcess`, ventana GTK/SDL y ciclo de vida real.~~ Hecho.
-7. Empaquetar el asset `share/qemu` solo si se quiere el fallback sin distro.
-8. Probar una ISO real de instalación (Linux invitado) de extremo a extremo.
+7. ~~Etapa 4.1: endurecimiento del asistente y ciclo de vida.~~ Hecho (2026-11-12).
+8. Reinstalar QEMU de distro con GTK/SDL y repetir la prueba de ventana nativa
+   (el host actual solo tiene el fallback gestionado headless).
+9. Empaquetar el asset `share/qemu` solo si se quiere el fallback sin distro.
+10. Probar una ISO real de instalación (Linux invitado) de extremo a extremo.
+11. (Opcional) CI con los cuatro tests en offscreen y traducciones `.ts`/`.qm`.

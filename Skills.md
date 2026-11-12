@@ -168,6 +168,64 @@
 - **Decisión:** `subprocess.run` con lista de argumentos, `shell=False` y
   timeout; nunca interpolar rutas en una shell.
 
+### Endurecimiento del asistente y validación única — 2026-11-12
+
+- **Evidencia:** `test_gui.py` → `43 OK · 0 WARN · 0 FAIL` (antes 21). Cubre
+  ISO inexistente y extensión incorrecta en `NamePage`, `isComplete()` sin
+  efectos, hint actualizado por `textChanged`, `accept()` rechazando una ISO
+  rota, edición con `VMWizard._load`, host degradado, `DiagnosticsDialog` y
+  `closeEvent` con runners activos.
+- **Decisión:** `models.name_errors()`/`models.iso_path_errors()` son la única
+  fuente de validación; la GUI no duplica reglas (ADR-014). `isComplete()` es
+  puro y el hint se refresca desde una señal, no como efecto secundario.
+
+### Recursos del host degradados sin romper el asistente — 2026-11-12
+
+- **Evidencia:** con `ram_max_mb=0` y `cores_max=0`, el asistente limita a
+  `4096 MB` y `1 vCPU`, muestra un aviso con el error de `/proc/meminfo` y
+  permite crear la VM igualmente.
+- **Decisión:** `HostInfo.effective_ram_max_mb`/`effective_cores_max` caen a
+  valores seguros y `resources_degraded` controla el aviso (ADR-015).
+
+### Diagnóstico sobre `environment_snapshot()` y copia — 2026-11-12
+
+- **Evidencia:** `DiagnosticsDialog` muestra app/Python/plataforma/KVM/RAM/CPUs/
+  binarios/backends a partir del mismo snapshot que usa el backend; el test
+  comprueba `8192 MB`, `/dev/kvm`, `gtk` y `11.0.0`, y que «Copiar» deja el
+  informe en el portapapeles.
+- **Decisión:** una sola fuente de verdad para el diagnóstico
+  (`core.environment_snapshot()`), inyectable en tests vía `snapshot=`.
+
+### Cierre ordenado de QEMU al salir — 2026-11-12
+
+- **Evidencia:** `closeEvent` con dos runners (uno obedece, otro no) →
+  `2 stop(graceful=True)`, espera por rodajas de 50 ms y `1 SIGKILL` solo para
+  el que sigue vivo; `runners` queda vacío.
+- **Decisión:** QMP/SIGTERM antes de `SIGKILL`, con plazos acotados
+  (`CLOSE_GRACEFUL_TIMEOUT_MS`/`CLOSE_KILL_TIMEOUT_MS`) y procesando eventos
+  para que QMP pueda responder (ADR-016).
+
+### Log persistente rotado y `--verbose` — 2026-11-12
+
+- **Evidencia:** `test_gui.py` comprueba `_parse_cli_args(["-v", "-platform",
+  "offscreen"])` → `verbose=True` y `qt_args` intactos, y que el log se crea en
+  `<VIBECBOX_DATA_HOME>/vibecBox.log`.
+- **Decisión:** fichero `RotatingFileHandler` (1 MiB × 3, DEBUG siempre) bajo
+  `data_home`; consola WARNING, DEBUG con `-v`. Los argumentos de Qt se separan
+  con `parse_known_args` para no romper `-platform`/`-style` (ADR-017).
+
+### Suite completa verde tras el endurecimiento — 2026-11-12
+
+- **Evidencia:** `test_core` `9 OK · 1 WARN · 0 FAIL`; `test_qemu` `24 OK · 0
+  WARN · 0 FAIL`; `test_gui` `43 OK · 0 WARN · 0 FAIL`; `test_runner` `9 OK · 0
+  WARN · 0 FAIL`. Los tests que resuelven binarios se ejecutaron con
+  `VIBECBOX_BIN_DIR=~/.local/share/vibecBox/bin` porque en este host ya no está
+  el QEMU de distro (`/usr/bin/qemu-system-x86_64` ausente); el WARN de
+  `test_core` es el fallback headless, no un fallo.
+- **Decisión:** los tests de GUI y de argumentos no dependen de una instalación
+  de distro concreta; el fallback gestionado cubre CI y hosts sin QEMU de
+  sistema.
+
 ## En validación
 
 ### Datos de runtime de QEMU (`share/qemu`)
