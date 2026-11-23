@@ -1,5 +1,8 @@
 # vibecBox
 
+<img alt="vibecBox logo" src="https://github.com/cargabsj175/vibecBox/blob/main/vibecBox.png" />
+
+
 **vibecBox** (*vivecode Box is not VirtualBox*) es una GUI de escritorio para Linux que
 imita la experiencia visual y el flujo de trabajo de VirtualBox, pero ejecuta
 **QEMU/KVM nativo**. No es un frontend de libvirt, no es un cliente remoto y no
