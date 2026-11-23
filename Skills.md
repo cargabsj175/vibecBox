@@ -226,6 +226,22 @@
   de distro concreta; el fallback gestionado cubre CI y hosts sin QEMU de
   sistema.
 
+### Instalación Meson con launcher, menú e icono — 2026-11-23
+
+- **Evidencia:** `meson setup build --prefix=/usr` + `meson test -C build` →
+  `1/1 vibecBox:validate-desktop OK`. El staging con
+  `DESTDIR=/tmp/opencode/vibecbox-destdir meson install -C build` colocó
+  `usr/bin/vibecbox` en modo `755`, `usr/share/applications/vibecbox.desktop`
+  en `644` y los seis iconos hicolor (16–256 px) en `644`, con el script de
+  cachés omitido por `DESTDIR`. `/usr/bin/python3 -c 'import vibecBox_gui,
+  models, qemu, runner, vibecBox_core'` → `system python imports OK`.
+- **Decisión:** Meson instala código y recursos; las dependencias viven en el
+  sistema, sin venv ni `pip` durante la instalación (ADR-018). Root solo en
+  `meson install`; la app corre como usuario normal y escribe en XDG.
+- **Pendiente:** ejecutar `sudo meson install -C build` en el host real; en esta
+  sesión `sudo` pidió contraseña interactiva, pero el staging y la validación
+  quedaron comprobados.
+
 ## En validación
 
 ### Datos de runtime de QEMU (`share/qemu`)

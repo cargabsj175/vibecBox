@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=vibecBox
+GenericName=Gestor de máquinas virtuales
+Comment=Interfaz GUI para QEMU/KVM nativo
+Exec=@BINDIR@/vibecbox
+Icon=vibecbox
+Terminal=false
+Categories=System;Emulator;Utility;
+StartupWMClass=vibecBox

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+exec @PYTHON@ @APPDIR@/vibecBox_gui.py "$@"

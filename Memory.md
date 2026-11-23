@@ -1,7 +1,7 @@
 # Memory.md — Roadmap y estado de vibecBox
 
 > Fuente de verdad del progreso. Actualizar al cerrar cada tarea.
-> Última actualización: 2026-11-12
+> Última actualización: 2026-11-23
 
 ## 0. Snapshot del host de desarrollo
 
@@ -16,6 +16,7 @@
 | `qemu-img` | **managed** `~/.local/share/vibecBox/bin/` (11.0.0) |
 | `~/.local/share/vibecBox/bin/` | existe; fallback `static-pie` (headless) de la Etapa 1 |
 | PyQt6 | **6.12.0** en `.venv` (creado con `--system-site-packages`) |
+| Instalación system-wide | Meson 1.11.1 (launcher `.desktop` + iconos hicolor 16–256) |
 
 > **Cambio de entorno (2026-11-12):** el QEMU de distro con GTK/SDL que se usó
 > para verificar la ventana nativa ya no está en `/usr/bin`. El backend resuelve
@@ -309,6 +310,54 @@ El WARN de `test_core` es el QEMU gestionado headless (sin GTK/SDL), coherente
 con el cambio de entorno anotado arriba. Los tests de GUI pasaron de 21 a 43
 casos.
 
+### Etapa 5 — Instalación system-wide con Meson `[COMPLETADA 2026-11-23]`
+
+**Objetivo:** instalar la GUI en `/usr` con launcher, entrada de menú e icono,
+usando solo dependencias del sistema (sin `.venv`, sin `pip`, sin red).
+
+- [x] `meson.build` con prefijo configurable y Python resuelto por el módulo
+      `python` de Meson.
+- [x] `vibecbox.in` generado en `bindir` con modo `rwxr-xr-x`.
+- [x] `vibecbox.desktop.in` generado en `datadir/applications` con
+      `Icon=vibecbox` y `StartupWMClass=vibecBox`.
+- [x] Iconos hicolor 16/32/48/64/128/256 derivados de `vibecBox.png` (1254×1254).
+- [x] `scripts/post_install.py` con `update-desktop-database` y
+      `gtk-update-icon-cache`, omitido cuando hay `DESTDIR`.
+- [x] `desktop-file-validate` como test de Meson.
+- [ ] `sudo meson install -C build` real en este host: no ejecutado porque
+      `sudo` pidió contraseña interactiva. El staging con `DESTDIR` quedó
+      verificado y el usuario debe ejecutar ese único comando.
+
+**Evidencia (2026-11-23):**
+
+```text
+$ meson setup build --prefix=/usr
+Project name: vibecBox
+Project version: 0.1.0
+Program python3 found: YES (/usr/bin/python3)
+Program desktop-file-validate found: YES (/usr/bin/desktop-file-validate)
+
+$ meson test -C build --print-errorlogs
+1/1 vibecBox:validate-desktop OK
+Ok: 1 · Fail: 0
+
+$ DESTDIR=/tmp/opencode/vibecbox-destdir meson install -C build
+... usr/bin/vibecbox                                  (755)
+... usr/share/applications/vibecbox.desktop          (644)
+... usr/share/vibecBox/vibecBox_gui.py               (644)
+... usr/share/icons/hicolor/256x256/apps/vibecbox.png (644)
+Running custom install script '.../scripts/post_install.py /usr share'
+```
+
+El lanzador generado contiene:
+
+```bash
+exec /usr/bin/python3 /usr/share/vibecBox/vibecBox_gui.py "$@"
+```
+
+La suite completa sigue verde: `test_core` `10 OK`, `test_qemu` `24 OK`,
+`test_gui` `43 OK`, `test_runner` `9 OK` (todos `0 WARN · 0 FAIL`).
+
 ## 2. Backlog / riesgos
 
 - Build propio estático con SDL2 (Alpine/musl) si se exige cero instalación;
@@ -376,6 +425,10 @@ casos.
   controla el nivel de consola; el fichero `<data_home>/vibecBox.log` usa
   `RotatingFileHandler` (1 MiB × 3) siempre en DEBUG. `parse_known_args()`
   separa las opciones propias de las que consume Qt (`-platform`, `-style`).
+- **ADR-018 — Instalación con Meson y dependencias del sistema.** `/usr` se
+  instala con `meson install --prefix=/usr`; el lanzador usa el Python del
+  sistema y no se crea venv ni se hace `pip` en la instalación. Root solo en
+  el paso de instalación; la app corre sin privilegios y escribe en XDG.
 
 ## 4. Próximos pasos
 
@@ -391,3 +444,6 @@ casos.
 9. Empaquetar el asset `share/qemu` solo si se quiere el fallback sin distro.
 10. Probar una ISO real de instalación (Linux invitado) de extremo a extremo.
 11. (Opcional) CI con los cuatro tests en offscreen y traducciones `.ts`/`.qm`.
+12. ~~Etapa 5: instalación system-wide con Meson, `.desktop` e icono.~~ Hecho
+    (2026-11-23); falta ejecutar `sudo meson install -C build` en el host real.
+

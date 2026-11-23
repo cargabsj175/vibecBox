@@ -79,6 +79,14 @@ vibecBox/
 ├── test_qemu.py       # tests de argumentos y discos, sin lanzar la VM
 ├── test_runner.py     # arranque real headless: QMP, SIGTERM y SIGKILL
 ├── requirements.txt   # PyQt6>=6.4 (solo GUI)
+├── meson.build        # instalación system-wide (sin venv, sin red)
+├── vibecbox.in        # plantilla del lanzador en bindir
+├── vibecbox.desktop.in  # plantilla de la entrada del menú
+├── vibecBox.png       # icono fuente (1254x1254 RGBA)
+├── icons/             # iconos hicolor 16/32/48/64/128/256
+│   └── <size>x<size>/apps/vibecbox.png
+├── scripts/
+│   └── post_install.py  # refresh de cachés (se omite con DESTDIR)
 ├── Agents.md          # este archivo
 ├── Memory.md          # roadmap y estado
 ├── Skills.md          # capacidades verificadas
@@ -137,3 +145,21 @@ vibecBox/
   código 0 y sin dejar procesos QEMU vivos.
 - Sin imports de PyQt6 en el backend; sin `sudo`; sin libvirt; sin VNC/SPICE embebido.
 - `Skills.md` refleja la nueva capacidad con evidencia reproducible.
+
+## 9. Instalación system-wide
+
+- Meson es la única vía para instalar en `/usr`. El prefijo por defecto es
+  configurable (`meson setup build --prefix=...`); no hay rutas fijas en las
+  plantillas más allá del prefijo resuelto en configuración.
+- Las dependencias de ejecución viven en el sistema. **No** se crea `.venv` ni
+  se ejecuta `pip` durante la instalación (ADR-018).
+- El lanzador usa el Python resuelto por el módulo `python` de Meson y apunta a
+  `@APPDIR@/vibecBox_gui.py`; se instala con modo `rwxr-xr-x`.
+- La entrada `.desktop` usa `Exec=@BINDIR@/vibecbox` e `Icon=vibecbox`.
+- Los iconos se instalan en `icons/hicolor/<size>x<size>/apps/` desde los PNG
+  derivados de `vibecBox.png`. No se instala el PNG de 1254 px directamente.
+- `scripts/post_install.py` refresca `update-desktop-database` y
+  `gtk-update-icon-cache` solo en instalaciones reales; con `DESTDIR` se omite
+  y lo hace el gestor de paquetes.
+- Root se usa solo en `meson install`. La app corre como usuario normal y los
+  datos siguen bajo `data_home()` (XDG), nunca bajo el prefijo del sistema.

@@ -41,7 +41,7 @@ cd vibecBox
 python3 -m venv .venv --system-site-packages
 
 # 3. Instalar dependencias
-.source .venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # 4. Verificar el entorno (opcional)
@@ -49,6 +49,54 @@ python3 test_core.py           # descubre binarios y capacidades del host
 QT_QPA_PLATFORM=offscreen .venv/bin/python test_gui.py  # modelo + GUI offscreen
 python3 test_qemu.py           # argumentos VirtIO y discos qcow2 (sin lanzar VM)
 QT_QPA_PLATFORM=offscreen .venv/bin/python test_runner.py  # QMP, SIGTERM/SIGKILL
+```
+
+## Instalación system-wide con Meson
+
+La instalación en `/usr` se hace con Meson. Las dependencias de ejecución
+(**Python 3 y PyQt6 >= 6.4**) deben estar disponibles en el sistema: no se crea
+`.venv` ni se descarga nada durante `meson install`.
+
+```bash
+meson setup build --prefix=/usr
+meson compile -C build
+meson test -C build              # valida el fichero .desktop
+sudo meson install -C build
+```
+
+Resultado:
+
+| Ruta | Contenido |
+|---|---|
+| `/usr/bin/vibecbox` | lanzador generado; invoca el Python del sistema |
+| `/usr/share/vibecBox/` | módulos Python y `requirements.txt` de referencia |
+| `/usr/share/doc/vibecBox/` | `LICENSE` y `README.md` |
+| `/usr/share/applications/vibecbox.desktop` | entrada del menú (`Icon=vibecbox`) |
+| `/usr/share/icons/hicolor/<tamaño>/apps/vibecbox.png` | iconos 16, 32, 48, 64, 128 y 256 px |
+
+Notas:
+
+- `sudo` se usa **solo para instalar**. vibecBox sigue corriendo como usuario
+  normal, sin privilegios (principio 7 de `Agents.md`).
+- Los datos, VMs y logs siguen en `~/.local/share/vibecBox` (XDG), nunca en
+  `/usr`.
+- Para instalar sin root, cambia el prefijo:
+  `meson setup build --prefix=~/.local` y luego `meson install -C build`
+  (asegúrate de tener `~/.local/bin` en el `PATH`).
+- Desinstalación: `sudo ninja -C build uninstall`.
+- Con `DESTDIR` el script de post-instalación no refresca las cachés; debe
+  hacerlo el gestor de paquetes.
+
+Si cambias el icono fuente `vibecBox.png`, regenera los tamaños antes de
+reinstalar:
+
+```bash
+for s in 16 32 48 64 128 256; do
+  mkdir -p "icons/${s}x${s}/apps"
+  inkscape vibecBox.png --export-type=png \
+    --export-filename="icons/${s}x${s}/apps/vibecbox.png" \
+    --export-width="$s" --export-height="$s"
+done
 ```
 
 ## Correr los tests
